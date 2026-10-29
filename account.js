@@ -1,0 +1,22 @@
+'use strict';
+(()=>{
+const BASE='https://juwtymuikwhqvxxbmygb.supabase.co';
+const KEY='sb_publishable_vcOp0RDySGs9wPBW2MfeRg_EowVK6uW';
+const $=id=>document.getElementById(id);
+let session=null;
+try{session=JSON.parse(localStorage.getItem('clipfactory_session')||'null')}catch{}
+const message=t=>{$('accountStatus').textContent=t};
+const save=()=>{if(session)localStorage.setItem('clipfactory_session',JSON.stringify(session));else localStorage.removeItem('clipfactory_session')};
+async function request(path,{method='GET',body,token}={}){const r=await fetch(BASE+path,{method,headers:{'apikey':KEY,'content-type':'application/json',...(token?{'authorization':'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{})});const txt=await r.text();let data;try{data=txt?JSON.parse(txt):null}catch{data={message:txt}}if(!r.ok)throw Error(data?.msg||data?.error_description||data?.message||data?.error||'Erreur '+r.status);return data}
+async function refresh(){if(!session?.refresh_token)return;const data=await request('/auth/v1/token?grant_type=refresh_token',{method:'POST',body:{refresh_token:session.refresh_token}});session=data;save()}
+async function authorized(path,opts={}){if(!session?.access_token)throw Error('Connecte-toi d’abord');if(session.expires_at&&Date.now()/1000>session.expires_at-90)await refresh();try{return await request(path,{...opts,token:session.access_token})}catch(e){if(String(e.message).includes('JWT')){await refresh();return request(path,{...opts,token:session.access_token})}throw e}}
+async function renderAccount(){const logged=!!session?.access_token;$('loginPanel').hidden=logged;$('loggedPanel').hidden=!logged;$('userEmail').textContent=session?.user?.email||'';if(logged){message('Compte connecté. Tes projets sont enregistrés dans ton espace privé.');await loadProjects()}else{message('Crée un compte ou connecte-toi pour sauvegarder tes projets.');$('projects').replaceChildren()}}
+async function loadProjects(){try{const rows=await authorized('/rest/v1/clip_projects?select=id,title,created_at&order=created_at.desc&limit=30');$('projects').replaceChildren();if(!rows.length){$('projects').textContent='Aucun projet enregistré.';return}rows.forEach(p=>{const div=document.createElement('div');div.className='social';const name=document.createElement('span');name.textContent=p.title;const date=document.createElement('span');date.textContent=new Date(p.created_at).toLocaleDateString('fr-FR');div.append(name,date);$('projects').append(div)})}catch(e){message('Impossible de charger les projets : '+e.message)}}
+$('authForm').addEventListener('submit',async e=>{e.preventDefault();const email=$('authEmail').value.trim(),password=$('authPassword').value;const signup=$('authMode').value==='signup';if(!email||password.length<6){message('Adresse e-mail et mot de passe de 6 caractères minimum requis.');return}const btn=$('authSubmit');btn.disabled=true;try{const data=await request(signup?'/auth/v1/signup':'/auth/v1/token?grant_type=password',{method:'POST',body:{email,password}});if(data.access_token){session=data;save();await renderAccount()}else message('Vérifie ta boîte e-mail pour confirmer ton inscription, puis connecte-toi.')}catch(e){message('Connexion impossible : '+e.message)}finally{btn.disabled=false}});
+$('logout').onclick=async()=>{session=null;save();await renderAccount()};
+$('saveProject').onclick=async()=>{const f=$('file').files?.[0];if(!f){message('Choisis d’abord une vidéo.');return}try{await authorized('/rest/v1/clip_projects',{method:'POST',body:{title:f.name}});message('Projet enregistré (nom uniquement, pas de transfert de vidéo).');await loadProjects()}catch(e){message('Enregistrement impossible : '+e.message)}};
+$('savePublishDraft').onclick=async()=>{try{const provider=$('draftProvider').value;await authorized('/rest/v1/publish_jobs',{method:'POST',body:{provider,caption:$('caption').value,status:'draft'}});message('Brouillon de publication sauvegardé. Il ne sera pas publié automatiquement.')}catch(e){message('Brouillon non enregistré : '+e.message)}};
+async function status(){try{const data=await authorized('/functions/v1/social-status');$('backendStatus').textContent='Serveur actif · connexions officielles en attente';return data}catch(e){$('backendStatus').textContent='Serveur non accessible : '+e.message}}
+$('checkBackend').onclick=status;
+renderAccount().catch(e=>message(e.message));
+})();
